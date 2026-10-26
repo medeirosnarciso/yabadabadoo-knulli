@@ -32,7 +32,8 @@ jobs:
           ROOT="$(pwd)"
           SRC="$ROOT/src/yabause/src/libretro"
           LOGS="$ROOT/out/logs"
-          mkdir -p "$LOGS" "$ROOT/out"
+          SHIM="$ROOT/out/shim"
+          mkdir -p "$LOGS" "$ROOT/out" "$SHIM"
 
           [ -d "$SRC" ] || { echo "ERRO: $SRC nao existe (estrutura do repositorio mudou?)"; exit 1; }
 
@@ -46,17 +47,31 @@ jobs:
             grep -rniE 'dynarec' "$SRC/Makefile" "$SRC"/*.mk 2>/dev/null | head -40 || true
           } > "$LOGS/diagnostico.txt" 2>&1
 
-          CROSS=aarch64-linux-gnu-
-          CANDIDATES="${PLATFORM:-classic_armv8_a35 unix linux-portable}"
+          # --- compiladores "filtro": removem flags de x86/ARM 32-bit que o gcc aarch64 rejeita ---
+          for t in gcc g++; do
+            cat > "$SHIM/aarch64-$t" <<SHIMEOF
+          #!/usr/bin/env bash
+          args=()
+          for a in "\$@"; do
+            case "\$a" in
+              -marm|-mthumb|-mfpmath=*|-msse*|-mssse3|-mavx*|-mfloat-abi=*|-mfpu=*|-m32|-DARM|-march=armv7*|-mtune=cortex-a7|-mtune=cortex-a9) ;;
+              *) args+=("\$a") ;;
+            esac
+          done
+          exec aarch64-linux-gnu-$t "\${args[@]}"
+          SHIMEOF
+            chmod +x "$SHIM/aarch64-$t"
+          done
+
+          CANDIDATES="${PLATFORM:-unix classic_armv8_a35}"
           OK=""
 
           for p in $CANDIDATES; do
             echo "=== Tentando platform=$p ==="
             make -C "$SRC" clean >/dev/null 2>&1 || true
             rm -f "$SRC"/*.so
-            # CC/CXX na linha de comando sobrescrevem as atribuicoes do Makefile.
             if make -C "$SRC" -j"$(nproc)" platform="$p" \
-                  CC=${CROSS}gcc CXX=${CROSS}g++ AR=${CROSS}ar STRIP=${CROSS}strip \
+                  CC="$SHIM/aarch64-gcc" CXX="$SHIM/aarch64-g++" AR=aarch64-linux-gnu-ar STRIP=aarch64-linux-gnu-strip \
                   ARCH=aarch64 HAVE_SH2_DYNAREC=0 SH2_DYNAREC=0 NO_DYNAREC=1 \
                   ${EXTRA_MAKE_ARGS:-} > "$LOGS/make-$p.log" 2>&1; then
               SO="$(ls "$SRC"/*libretro*.so 2>/dev/null | head -1)"
@@ -66,7 +81,8 @@ jobs:
               fi
               echo "make terminou, mas o .so nao e aarch64: $(file "$SO" 2>/dev/null)"
             else
-              echo "Falhou com platform=$p (ultimas linhas):"; tail -n 15 "$LOGS/make-$p.log"
+              echo "Falhou com platform=$p. Erros:"
+              grep -nE 'error|Error|undefined reference|No such file|cannot find' "$LOGS/make-$p.log" | cut -c1-220 | head -25
             fi
           done
 
@@ -310,7 +326,6 @@ jobs:
           sh /userdata/yabadabadoo-knulli/uninstall.sh
           __YABA_EOF_7__
           chmod +x ci/*.sh knulli/*.sh package/*.sh
-          ls -R ci knulli package
 
       - name: Dependências
         run: |
