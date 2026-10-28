@@ -1,0 +1,44 @@
+name: Libs do Pirry (libstdc++ arm64)
+
+# Baixa libstdc++ e libgcc_s (arm64) do Debian trixie e monta um zip para extrair em /userdata.
+on:
+  workflow_dispatch:
+
+jobs:
+  libs:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Baixar libstdc++ e libgcc (Debian arm64)
+        run: |
+          set -eu
+          mkdir -p work && cd work
+          got=0
+          for src in gcc-14 gcc-15; do
+            BASE="https://deb.debian.org/debian/pool/main/g/$src/"
+            curl -fsSL "$BASE" -o index.html || continue
+            STD=$(grep -oE 'href="libstdc(\+\+|%2B%2B)6_[^"]*_arm64\.deb"' index.html | sed 's/^href="//; s/"$//' | sort -uV | tail -1)
+            GCC=$(grep -oE 'href="libgcc-s1_[^"]*_arm64\.deb"' index.html | sed 's/^href="//; s/"$//' | sort -uV | tail -1)
+            echo "$src: STD=$STD GCC=$GCC"
+            [ -n "$STD" ] && [ -n "$GCC" ] || continue
+            curl -fsSLO "$BASE$STD" && curl -fsSLO "$BASE$GCC" && { got=1; break; }
+          done
+          [ "$got" = 1 ] || { echo "ERRO: nao consegui baixar os pacotes"; exit 1; }
+          ls -l *.deb
+          for d in *.deb; do dpkg-deb -x "$d" x; done
+          mkdir -p ../out/system/yabasanshiro-pirry/libs
+          cp "$(find x -name 'libstdc++.so.6.*' -type f | head -1)" ../out/system/yabasanshiro-pirry/libs/libstdc++.so.6
+          cp "$(find x -name 'libgcc_s.so.1' -type f | head -1)"    ../out/system/yabasanshiro-pirry/libs/libgcc_s.so.1
+          cd ../out/system/yabasanshiro-pirry/libs
+          echo "--- versoes oferecidas:"
+          readelf -V libstdc++.so.6 | grep -oE 'CXXABI_1\.3\.1[0-9]' | sort -uV | tail -3
+          readelf -V libstdc++.so.6 | grep -oE 'GLIBC_2\.[0-9]+' | sort -uV | tail -1 | sed 's/^/glibc maxima exigida: /'
+          readelf -V libstdc++.so.6 | grep -q 'CXXABI_1.3.15' || { echo "ERRO: CXXABI_1.3.15 ausente"; exit 1; }
+          ls -l
+          cd ../../.. && zip -qr ../pirry-libs.zip system && unzip -l ../pirry-libs.zip
+
+      - name: Publicar
+        uses: actions/upload-artifact@v4
+        with:
+          name: pirry-libs
+          path: out/pirry-libs.zip
+          if-no-files-found: error
