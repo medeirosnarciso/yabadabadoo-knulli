@@ -34,7 +34,7 @@ jobs:
           readelf -V libstdc++.so.6 | grep -oE 'GLIBC_2\.[0-9]+' | sort -uV | tail -1 | sed 's/^/glibc maxima exigida: /'
           readelf -V libstdc++.so.6 | grep -q 'CXXABI_1.3.15' || { echo "ERRO: CXXABI_1.3.15 ausente"; exit 1; }
           ls -l
-          cd ../../.. && zip -qr ../pirry-libs.zip system && unzip -l ../pirry-libs.zip
+          cd ../../.. && zip -qr pirry-libs.zip system && unzip -l pirry-libs.zip
 
       - name: Publicar
         uses: actions/upload-artifact@v4
